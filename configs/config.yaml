@@ -1,0 +1,136 @@
+# 配置文件
+
+server:
+  # HTTP 服务器配置
+  addr: :8080
+  mode: debug # debug, release
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 60s
+
+# 数据库配置
+database:
+  # 驱动类型: mysql, postgres
+  driver: mysql
+  # 数据源名称
+  dsn: "user:password@tcp(localhost:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Local"
+  # 连接池配置
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 3600s
+  conn_max_idle_time: 1800s
+  # 慢查询阈值
+  slow_threshold: 1s
+  # 日志级别: silent, error, warn, info
+  log_level: warn
+
+# Redis 配置
+redis:
+  # 地址
+  addr: "localhost:6379"
+  # 密码
+  password: ""
+  # 数据库编号
+  db: 0
+  # 连接池配置
+  pool_size: 10
+  min_idle_conns: 5
+  max_conn_age: 30s
+  # 超时配置
+  read_timeout: 3s
+  write_timeout: 3s
+  dial_timeout: 3s
+  pool_timeout: 3s
+  # 重试次数
+  retries: 3
+
+# 日志配置
+log:
+  # 日志级别: debug, info, warn, error
+  level: debug
+  # 输出格式: json, console
+  format: json
+  # 输出路径
+  output: stdout
+
+# 认证配置
+auth:
+  # JWT 密钥
+  jwt_secret: "your-secret-key-change-in-production"
+  # JWT 发行者
+  jwt_issuer: "go-ants"
+  # JWT 受众
+  jwt_audience: "go-ants"
+  # Access Token 过期时间
+  jwt_expiration: 86400 # 秒 (24小时)
+  # Refresh Token 过期时间
+  jwt_refresh_expiration: 2592000 # 秒 (30天)
+
+# 消息队列配置
+mq:
+  # Kafka 配置
+  kafka:
+    brokers:
+      - localhost:9092
+    # 消费者组
+    group_id: "go-ants-consumer"
+  # RabbitMQ 配置
+  rabbitmq:
+    url: "amqp://guest:guest@localhost:5672/"
+    exchange: "go-ants"
+    exchange_type: "direct"
+
+# Elasticsearch 配置
+es:
+  addresses:
+    - http://localhost:9200
+  # 用户名
+  username: ""
+  # 密码
+  password: ""
+  # 索引前缀
+  index_prefix: "go-ants"
+
+# 监控配置
+metric:
+  # 是否启用
+  enabled: true
+  # 端口
+  port: 9090
+  # pprof 配置
+  pprof:
+    enabled: true
+    port: 6060
+
+# 工作池配置
+worker:
+  # 工作协程数量
+  workers: 10
+  # 队列大小
+  queue_size: 1000
+  # 队列超时
+  queue_timeout: 5s
+
+# CORS 配置
+cors:
+  # 是否启用
+  enabled: true
+  # 允许的源
+  allowed_origins:
+    - "*"
+  # 允许的方法
+  allowed_methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - OPTIONS
+  # 允许的头
+  allowed_headers:
+    - Origin
+    - Content-Type
+    - Authorization
+  # 允许凭证
+  allow_credentials: true
+  # 最大_age
+  max_age: 86400
