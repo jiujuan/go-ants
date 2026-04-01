@@ -1,7 +1,7 @@
 
 ## go-ants
 
-go-ants 是一个现代化的 Go Web 应用开发框架，参考 [kratos](https://github.com/go-kratos/kratos) 的架构设计，提供一个单体应用解决方案。
+go-ants 是一个现代化的 Go Web 应用开发框架，提供一个单体应用解决脚手架。
 
 ## 特性
 

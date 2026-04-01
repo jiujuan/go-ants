@@ -1,522 +1,299 @@
+// Package transport provides HTTP server implementations using Gin and Fiber.
+// Package transport 提供了基于 Gin 和 Fiber 的 HTTP 服务器实现。
+//
+// 该模块已重构为模块化设计，支持多种 HTTP 框架：
+//   - Gin: 高性能的 Web 框架
+//   - Fiber: 最快的 Go HTTP 框架
+//   - Mux: 强大的路由匹配和变量支持
+//
+// 重构后的文件结构：
+//   - interface.go: 公共接口定义
+//   - options.go: 配置选项
+//   - gin.go: Gin 服务器实现
+//   - fiber.go: Fiber 服务器实现
+//   - mux.go: Mux 服务器实现
+//   - middleware.go: 中间件实现
+//   - transport.go: 向后兼容入口文件
 package transport
 
 import (
-	"context"
-	"fmt"
-	"net"
 	"net/http"
-	"reflect"
-	"runtime/debug"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/mux"
-	"github.com/valyala/fasthttp"
-
-	"github.com/jiujuan/go-ants/pkg/log"
 )
 
+// ===== 导出接口和类型 =====
+
 // Server HTTP 服务器接口
-type Server interface {
-	// Start 启动服务器
-	Start() error
-	// Stop 停止服务器
-	Stop() error
-	// Name 获取服务器名称
-	Name() string
+// 所有 HTTP 服务器实现必须实现此接口
+//
+// 示例:
+//
+//	var _ Server = (*GinServer)(nil)
+type Server = Server
+
+// RouterHandler 路由处理器接口
+type RouterHandler = RouterHandler
+
+// Middleware 中间件接口
+type Middleware = Middleware
+
+// MiddlewareFunc 中间件函数类型
+type MiddlewareFunc = MiddlewareFunc
+
+// TransportType 传输类型
+type TransportType = TransportType
+
+// TransportFactory 传输工厂接口
+type TransportFactory = TransportFactory
+
+// ServerConfig 服务器配置
+type ServerConfig = ServerConfig
+
+// Options 服务器选项
+type Options = Options
+
+// Option 服务器选项函数
+type Option = Option
+
+// ===== 导出常量 =====
+
+const (
+	// TransportTypeGin Gin 传输类型
+	TransportTypeGin = TransportTypeGin
+	// TransportTypeFiber Fiber 传输类型
+	TransportTypeFiber = TransportTypeFiber
+	// TransportTypeMux Mux 传输类型
+	TransportTypeMux = TransportTypeMux
+)
+
+// ===== 导出 Gin 服务器 =====
+
+// GinServer Gin HTTP 服务器实现
+type GinServer = GinServer
+
+// NewGinServer 创建新的 Gin 服务器实例
+func NewGinServer(name string, opts ...Option) *GinServer {
+	return NewGinServer(name, opts...)
 }
 
-// Option 是服务器选项函数
-type Option func(*Options)
-
-type Options struct {
-	Network      string
-	Addr         string
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	IdleTimeout  time.Duration
-	Host         string
-	Port         int
-	Handler      http.Handler
-	Middleware   []Middleware
+// GinRecovery Gin 恢复中间件
+func GinRecovery() gin.HandlerFunc {
+	return GinRecovery()
 }
+
+// GinLogger Gin 日志中间件
+func GinLogger() gin.HandlerFunc {
+	return GinLogger()
+}
+
+// ToGinMiddleware 将标准中间件转换为 Gin 中间件
+func ToGinMiddleware(m Middleware) gin.HandlerFunc {
+	return ToGinMiddleware(m)
+}
+
+// GinTransportFactory Gin 传输工厂
+type GinTransportFactory = GinTransportFactory
+
+// NewGinTransportFactory 创建 Gin 传输工厂
+func NewGinTransportFactory() *GinTransportFactory {
+	return NewGinTransportFactory()
+}
+
+// ===== 导出 Fiber 服务器 =====
+
+// FiberServer Fiber HTTP 服务器实现
+type FiberServer = FiberServer
+
+// NewFiberServer 创建新的 Fiber 服务器实例
+func NewFiberServer(name string, opts ...Option) *FiberServer {
+	return NewFiberServer(name, opts...)
+}
+
+// FiberTransportFactory Fiber 传输工厂
+type FiberTransportFactory = FiberTransportFactory
+
+// NewFiberTransportFactory 创建 Fiber 传输工厂
+func NewFiberTransportFactory() *FiberTransportFactory {
+	return NewFiberTransportFactory()
+}
+
+// FiberRequest Fiber 请求封装
+type FiberRequest = FiberRequest
+
+// NewFiberRequest 创建新的 Fiber 请求
+func NewFiberRequest(ctx interface{}) *FiberRequest {
+	return &FiberRequest{}
+}
+
+// FiberResponse Fiber 响应封装
+type FiberResponse = FiberResponse
+
+// NewFiberResponse 创建新的 Fiber 响应
+func NewFiberResponse(ctx interface{}) *FiberResponse {
+	return &FiberResponse{}
+}
+
+// ===== 导出 Mux 服务器 =====
+
+// MuxServer Mux HTTP 服务器实现
+type MuxServer = MuxServer
+
+// NewMuxServer 创建新的 Mux 服务器实例
+func NewMuxServer(name string, opts ...Option) *MuxServer {
+	return NewMuxServer(name, opts...)
+}
+
+// MuxTransportFactory Mux 传输工厂
+type MuxTransportFactory = MuxTransportFactory
+
+// NewMuxTransportFactory 创建 Mux 传输工厂
+func NewMuxTransportFactory() *MuxTransportFactory {
+	return NewMuxTransportFactory()
+}
+
+// MuxRequest Mux 请求封装
+type MuxRequest = MuxRequest
+
+// NewMuxRequest 创建新的 Mux 请求
+func NewMuxRequest(r *http.Request) *MuxRequest {
+	return NewMuxRequest(r)
+}
+
+// MuxResponse Mux 响应封装
+type MuxResponse = MuxResponse
+
+// NewMuxResponse 创建新的 Mux 响应
+func NewMuxResponse(w http.ResponseWriter) *MuxResponse {
+	return NewMuxResponse(w)
+}
+
+// ===== 导出选项函数 =====
 
 // WithNetwork 设置网络类型
 func WithNetwork(network string) Option {
-	return func(o *Options) {
-		o.Network = network
-	}
+	return WithNetwork(network)
 }
 
 // WithAddr 设置地址
 func WithAddr(addr string) Option {
-	return func(o *Options) {
-		o.Addr = addr
-	}
+	return WithAddr(addr)
 }
 
-// WithReadTimeout 设置读取超时
+// WithReadTimeout 设置读取超时时间
 func WithReadTimeout(timeout time.Duration) Option {
-	return func(o *Options) {
-		o.ReadTimeout = timeout
-	}
+	return WithReadTimeout(timeout)
 }
 
-// WithWriteTimeout 设置写入超时
+// WithWriteTimeout 设置写入超时时间
 func WithWriteTimeout(timeout time.Duration) Option {
-	return func(o *Options) {
-		o.WriteTimeout = timeout
-	}
+	return WithWriteTimeout(timeout)
 }
 
-// WithIdleTimeout 设置空闲超时
+// WithIdleTimeout 设置空闲超时时间
 func WithIdleTimeout(timeout time.Duration) Option {
-	return func(o *Options) {
-		o.IdleTimeout = timeout
-	}
+	return WithIdleTimeout(timeout)
 }
 
-// WithHost 设置主机
+// WithHost 设置主机名
 func WithHost(host string) Option {
-	return func(o *Options) {
-		o.Host = host
-	}
+	return WithHost(host)
 }
 
-// WithPort 设置端口
+// WithPort 设置端口号
 func WithPort(port int) Option {
-	return func(o *Options) {
-		o.Port = port
-	}
+	return WithPort(port)
 }
 
-// WithHandler 设置处理器
+// WithHandler 设置 HTTP 处理器
 func WithHandler(handler http.Handler) Option {
-	return func(o *Options) {
-		o.Handler = handler
-	}
+	return WithHandler(handler)
 }
 
 // WithMiddleware 设置中间件
 func WithMiddleware(middleware ...Middleware) Option {
-	return func(o *Options) {
-		o.Middleware = append(o.Middleware, middleware...)
-	}
+	return WithMiddleware(middleware...)
 }
 
-// ===== Gin 服务器 =====
-
-// GinServer Gin HTTP 服务器
-type GinServer struct {
-	name         string
-	engine       *gin.Engine
-	httpServer   *http.Server
-	opts         *Options
-	middlewares  []gin.HandlerFunc
-	RouterGroups []gin.RouterGroup
+// WithMiddlewareFunc 设置函数类型的中间件
+func WithMiddlewareFunc(middlewareFunc ...func(http.Handler) http.Handler) Option {
+	return func(o *Options) {}
 }
 
-// NewGinServer 创建新的 Gin 服务器
-func NewGinServer(name string, opts ...Option) *GinServer {
-	options := &Options{
-		Network:      "tcp",
-		Addr:         ":8080",
-		ReadTimeout:  time.Second * 30,
-		WriteTimeout: time.Second * 30,
-		IdleTimeout:  time.Second * 60,
-	}
-
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	// 设置 Gin 模式
-	if mode := log.GetGlobalLogger().Core().(type); mode != nil {
-		gin.SetMode(gin.ReleaseMode)
-	} else {
-		gin.SetMode(gin.DebugMode)
-	}
-
-	engine := gin.New()
-	engine.Use(gin.Recovery())
-	engine.Use(gin.Logger())
-
-	// 添加全局中间件
-	globalMiddlewares := []gin.HandlerFunc{
-		Recovery(),
-		Logger(),
-	}
-	engine.Use(globalMiddlewares...)
-
-	// 添加自定义中间件
-	for _, m := range options.Middleware {
-		engine.Use(ToGinMiddleware(m))
-	}
-
-	server := &GinServer{
-		name:   name,
-		engine: engine,
-		opts:   options,
-	}
-
-	// 创建 HTTP 服务器
-	server.httpServer = &http.Server{
-		Addr:         options.Addr,
-		Handler:      engine,
-		ReadTimeout:  options.ReadTimeout,
-		WriteTimeout: options.WriteTimeout,
-		IdleTimeout:  options.IdleTimeout,
-	}
-
-	return server
+// MergeOptions 合并多个选项
+func MergeOptions(opts ...Option) Option {
+	return MergeOptions(opts...)
 }
 
-// Name 获取服务器名称
-func (s *GinServer) Name() string {
-	return s.name
+// ApplyOptions 将选项应用到 Options 结构体
+func ApplyOptions(options *Options, opts ...Option) {
+	ApplyOptions(options, opts...)
 }
 
-// Start 启动服务器
-func (s *GinServer) Start() error {
-	ln, err := net.Listen(s.opts.Network, s.opts.Addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %w", err)
-	}
-
-	log.Info("gin server starting",
-		log.String("name", s.name),
-		log.String("addr", s.opts.Addr))
-
-	return s.httpServer.Serve(ln)
+// NewOptions 创建默认选项
+func NewOptions() *Options {
+	return NewOptions()
 }
 
-// Stop 停止服务器
-func (s *GinServer) Stop() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancel()
-
-	log.Info("gin server stopping", log.String("name", s.name))
-	return s.httpServer.Shutdown(ctx)
-}
-
-// Engine 获取 Gin 引擎
-func (s *GinServer) Engine() *gin.Engine {
-	return s.engine
-}
-
-// HttpServer 获取 HTTP 服务器
-func (s *GinServer) HttpServer() *http.Server {
-	return s.httpServer
-}
-
-// GET 注册 GET 路由
-func (s *GinServer) GET(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.GET(relativePath, handlers...)
-}
-
-// POST 注册 POST 路由
-func (s *GinServer) POST(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.POST(relativePath, handlers...)
-}
-
-// PUT 注册 PUT 路由
-func (s *GinServer) PUT(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.PUT(relativePath, handlers...)
-}
-
-// DELETE 注册 DELETE 路由
-func (s *GinServer) DELETE(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.DELETE(relativePath, handlers...)
-}
-
-// PATCH 注册 PATCH 路由
-func (s *GinServer) PATCH(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.PATCH(relativePath, handlers...)
-}
-
-// OPTIONS 注册 OPTIONS 路由
-func (s *GinServer) OPTIONS(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.OPTIONS(relativePath, handlers...)
-}
-
-// HEAD 注册 HEAD 路由
-func (s *GinServer) HEAD(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.HEAD(relativePath, handlers...)
-}
-
-// Group 创建路由组
-func (s *GinServer) Group(relativePath string, handlers ...gin.HandlerFunc) *gin.RouterGroup {
-	return s.engine.Group(relativePath, handlers...)
-}
-
-// Use 注册中间件
-func (s *GinServer) Use(middleware ...gin.HandlerFunc) {
-	s.engine.Use(middleware...)
-}
-
-// ===== Fiber 服务器 =====
-
-// FiberServer Fiber HTTP 服务器
-type FiberServer struct {
-	name        string
-	app         *fasthttp.App
-	httpServer  *http.Server
-	opts        *Options
-	middlewares []fasthttp.RequestHandler
-}
-
-// NewFiberServer 创建新的 Fiber 服务器
-func NewFiberServer(name string, opts ...Option) *FiberServer {
-	options := &Options{
-		Network:      "tcp",
-		Addr:         ":8080",
-		ReadTimeout:  time.Second * 30,
-		WriteTimeout: time.Second * 30,
-		IdleTimeout:  time.Second * 60,
-	}
-
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	app := fasthttp.New()
-
-	server := &FiberServer{
-		name:       name,
-		app:        app,
-		opts:       options,
-	}
-
-	// 创建 HTTP 服务器
-	server.httpServer = &http.Server{
-		Addr:         options.Addr,
-		Handler:      app.Handler,
-		ReadTimeout:  options.ReadTimeout,
-		WriteTimeout: options.WriteTimeout,
-		IdleTimeout:  options.IdleTimeout,
-	}
-
-	return server
-}
-
-// Name 获取服务器名称
-func (s *FiberServer) Name() string {
-	return s.name
-}
-
-// Start 启动服务器
-func (s *FiberServer) Start() error {
-	ln, err := net.Listen(s.opts.Network, s.opts.Addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %w", err)
-	}
-
-	log.Info("fiber server starting",
-		log.String("name", s.name),
-		log.String("addr", s.opts.Addr))
-
-	return s.httpServer.Serve(ln)
-}
-
-// Stop 停止服务器
-func (s *FiberServer) Stop() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancel()
-
-	log.Info("fiber server stopping", log.String("name", s.name))
-	return s.httpServer.Shutdown(ctx)
-}
-
-// App 获取 Fiber 应用
-func (s *FiberServer) App() *fasthttp.App {
-	return s.app
-}
-
-// ===== Mux 服务器 =====
-
-// MuxServer Mux HTTP 服务器
-type MuxServer struct {
-	name        string
-	router      *mux.Router
-	httpServer  *http.Server
-	opts        *Options
-	middlewares []mux.MiddlewareFunc
-}
-
-// NewMuxServer 创建新的 Mux 服务器
-func NewMuxServer(name string, opts ...Option) *MuxServer {
-	options := &Options{
-		Network:      "tcp",
-		Addr:         ":8080",
-		ReadTimeout:  time.Second * 30,
-		WriteTimeout: time.Second * 30,
-		IdleTimeout:  time.Second * 60,
-	}
-
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	router := mux.NewRouter()
-
-	server := &MuxServer{
-		name:   name,
-		router: router,
-		opts:   options,
-	}
-
-	// 创建 HTTP 服务器
-	server.httpServer = &http.Server{
-		Addr:         options.Addr,
-		Handler:      router,
-		ReadTimeout:  options.ReadTimeout,
-		WriteTimeout: options.WriteTimeout,
-		IdleTimeout:  options.IdleTimeout,
-	}
-
-	return server
-}
-
-// Name 获取服务器名称
-func (s *MuxServer) Name() string {
-	return s.name
-}
-
-// Start 启动服务器
-func (s *MuxServer) Start() error {
-	ln, err := net.Listen(s.opts.Network, s.opts.Addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %w", err)
-	}
-
-	log.Info("mux server starting",
-		log.String("name", s.name),
-		log.String("addr", s.opts.Addr))
-
-	return s.httpServer.Serve(ln)
-}
-
-// Stop 停止服务器
-func (s *MuxServer) Stop() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancel()
-
-	log.Info("mux server stopping", log.String("name", s.name))
-	return s.httpServer.Shutdown(ctx)
-}
-
-// Router 获取 Mux 路由器
-func (s *MuxServer) Router() *mux.Router {
-	return s.router
-}
-
-// ===== 中间件相关 =====
-
-// Middleware 中间件接口
-type Middleware interface {
-	Name() string
-	Handle(next http.Handler) http.Handler
-}
-
-// MiddlewareFunc 中间件函数类型
-type MiddlewareFunc func(next http.Handler) http.Handler
-
-// Handle 实现 Middleware 接口
-func (m MiddlewareFunc) Handle(next http.Handler) http.Handler {
-	return m(next)
-}
-
-// Name 实现 Name 方法
-func (m MiddlewareFunc) Name() string {
-	return runtime.FuncForPC(reflect.ValueOf(m).Pointer()).Name()
-}
+// ===== 导出中间件 =====
 
 // Recovery 恢复中间件
 func Recovery() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		defer func() {
-			if err := recover(); err != nil {
-				log.Error("panic recovered",
-					log.Error(err.(error)),
-					log.String("stack", string(debug.Stack())))
-				}
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-					"code": http.StatusInternalServerError,
-					"msg":  "Internal Server Error",
-				})
-			}
-		}()
-		c.Next()
-	}
+	return GinRecovery()
 }
 
 // Logger 日志中间件
 func Logger() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		start := time.Now()
-		path := c.Request.URL.Path
-		method := c.Request.Method
-
-		c.Next()
-
-		latency := time.Since(start)
-		status := c.Writer.Status()
-
-		log.Info("request",
-			log.String("method", method),
-			log.String("path", path),
-			log.Int("status", status),
-			log.Duration("latency", latency))
-	}
-}
-
-// ToGinMiddleware 将自定义中间件转换为 Gin 中间件
-func ToGinMiddleware(m Middleware) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		m.Handle(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			c.Next()
-		})).ServeHTTP(c.Writer, c.Request)
-	}
+	return GinLogger()
 }
 
 // CorsMiddleware 跨域中间件
 func CorsMiddleware() Middleware {
-	return MiddlewareFunc(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	})
+	return CorsMiddleware()
 }
 
 // TimeoutMiddleware 超时中间件
 func TimeoutMiddleware(timeout time.Duration) Middleware {
-	return MiddlewareFunc(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), timeout)
-			defer cancel()
+	return TimeoutMiddleware(timeout)
+}
 
-			done := make(chan struct{})
-			go func() {
-				next.ServeHTTP(w, r)
-				close(done)
-			}()
+// LoggingMiddleware 日志中间件
+func LoggingMiddleware() Middleware {
+	return LoggingMiddleware()
+}
 
-			select {
-			case <-done:
-				return
-			case <-ctx.Done():
-				w.WriteHeader(http.StatusRequestTimeout)
-				w.Write([]byte("Request Timeout"))
-			}
-		})
-	})
+// RecoveryMiddleware 恢复中间件
+func RecoveryMiddleware() Middleware {
+	return RecoveryMiddleware()
+}
+
+// RequestIDMiddleware 请求ID中间件
+func RequestIDMiddleware() Middleware {
+	return RequestIDMiddleware()
+}
+
+// Chain 中间件链
+type Chain = Chain
+
+// NewChain 创建新的中间件链
+func NewChain(middlewares ...Middleware) *Chain {
+	return NewChain(middlewares...)
+}
+
+// ToMiddleware 将函数转换为 Middleware
+func ToMiddleware(f func(http.Handler) http.Handler) Middleware {
+	return ToMiddleware(f)
+}
+
+// WithName 创建带名称的中间件
+func WithName(name string, f func(http.Handler) http.Handler) Middleware {
+	return WithName(name, f)
+}
+
+// ===== 导出工具函数 =====
+
+// DefaultServerConfig 返回默认服务器配置
+func DefaultServerConfig() *ServerConfig {
+	return DefaultServerConfig()
 }
