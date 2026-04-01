@@ -1,3 +1,4 @@
+// Package ants 是 go-ants 框架的核心入口，提供了应用程序生命周期管理和依赖注入工具。
 package ants
 
 import (
