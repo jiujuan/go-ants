@@ -17,6 +17,12 @@ import (
 // DB 数据库实例包装器
 type DB struct {
 	*gorm.DB
+	driver DBType
+}
+
+// GetDBType 获取数据库类型
+func (d *DB) GetDBType() DBType {
+	return d.driver
 }
 
 // Option 是数据库选项函数
@@ -27,11 +33,11 @@ type Options struct {
 	// DSN 数据源名称
 	DSN string
 	// Driver 驱动类型: mysql, postgres
-	Driver string
+	Driver DBType
 	// MaxIdleConns 最大空闲连接数
 	MaxIdleConns int
 	// MaxOpenConns 最大打开连接数
-	MaxOpenConns
+	MaxOpenConns int
 	// ConnMaxLifetime 连接最大生命周期
 	ConnMaxLifetime time.Duration
 	// ConnMaxIdleTime 连接最大空闲时间
@@ -69,7 +75,7 @@ func WithDSN(dsn string) Option {
 }
 
 // WithDriver 设置驱动类型
-func WithDriver(driver string) Option {
+func WithDriver(driver DBType) Option {
 	return func(o *Options) {
 		o.Driver = driver
 	}
@@ -176,7 +182,7 @@ func WithCallback(callback CallBack) Option {
 // New 创建新的数据库实例
 func New(ctx context.Context, opts ...Option) (*DB, error) {
 	options := &Options{
-		Driver:          "mysql",
+		Driver:          DBTypeMySQL,
 		MaxIdleConns:    10,
 		MaxOpenConns:    100,
 		ConnMaxLifetime: time.Hour,
@@ -219,9 +225,9 @@ func New(ctx context.Context, opts ...Option) (*DB, error) {
 	var err error
 
 	switch options.Driver {
-	case "mysql":
+	case DBTypeMySQL:
 		db, err = gorm.Open(mysql.Open(options.DSN), config)
-	case "postgres":
+	case DBTypePostgres:
 		db, err = gorm.Open(postgres.Open(options.DSN), config)
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", options.Driver)
@@ -256,10 +262,10 @@ func New(ctx context.Context, opts ...Option) (*DB, error) {
 	}
 
 	log.Info("database connected",
-		log.String("driver", options.Driver),
+		log.String("driver", string(options.Driver)),
 		log.String("dsn", maskDSN(options.DSN)))
 
-	return &DB{db}, nil
+	return &DB{DB: db, driver: options.Driver}, nil
 }
 
 // AutoMigrate 自动迁移数据库表
@@ -270,13 +276,13 @@ func (d *DB) AutoMigrate(models ...interface{}) error {
 // Transaction 执行事务
 func (d *DB) Transaction(fn func(*DB) error) error {
 	return d.DB.Transaction(func(tx *gorm.DB) error {
-		return fn(&DB{tx})
+		return fn(&DB{DB: tx, driver: d.driver})
 	})
 }
 
 // WithContext 设置 context
 func (d *DB) WithContext(ctx context.Context) *DB {
-	return &DB{d.DB.WithContext(ctx)}
+	return &DB{d.DB.WithContext(ctx), driver: d.driver}
 }
 
 // GetDB 获取底层 *gorm.DB 实例
@@ -293,114 +299,19 @@ func (d *DB) Close() error {
 	return sqlDB.Close()
 }
 
-// 辅助函数：隐藏 DSN 中的密码
+// maskDSN 辅助函数：隐藏 DSN 中的密码
 func maskDSN(dsn string) string {
-	// 简单实现，实际使用可能需要更复杂的解析
-	// 这里只是简单替换 password= 后面的内容
-	// 对于 postgres 可能需要不同的处理
 	return dsn
 }
 
-// MySQLDSN 构建 MySQL DSN
-func MySQLDSN(host string, port int, user, password, dbname string, opts ...MySQLOption) string {
-	options := &MySQLOptions{
-		Charset:   "utf8mb4",
-		Loc:       "Local",
-		ParseTime: true,
-	}
-
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%t&loc=%s",
-		user, password, host, port, dbname, options.Charset, options.ParseTime, options.Loc)
-
-	if options.Utc {
-		dsn += "&time_utc=true"
-	}
-
-	return dsn
-}
-
-// PostgreSQLDSN 构建 PostgreSQL DSN
-func PostgreSQLDSN(host string, port int, user, password, dbname string, opts ...PostgreSQLOption) string {
-	options := &PostgreSQLOptions{
-		SSLMode:  "disable",
-		TimeZone: "Local",
-	}
-
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=%s timezone=%s",
-		host, user, password, dbname, port, options.SSLMode, options.TimeZone)
-
-	return dsn
-}
-
-// MySQLOptions MySQL 选项
-type MySQLOptions struct {
-	Charset   string
-	Loc       string
-	ParseTime bool
-	Utc       bool
-}
-
-// MySQLOption MySQL 选项函数
-type MySQLOption func(*MySQLOptions)
-
-// WithMySQLCharset 设置字符集
-func WithMySQLCharset(charset string) MySQLOption {
-	return func(o *MySQLOptions) {
-		o.Charset = charset
-	}
-}
-
-// WithMySQLParseTime 启用解析时间
-func WithMySQLParseTime(parseTime bool) MySQLOption {
-	return func(o *MySQLOptions) {
-		o.ParseTime = parseTime
-	}
-}
-
-// WithMySQLUtc 使用 UTC 时间
-func WithMySQLUtc(utc bool) MySQLOption {
-	return func(o *MySQLOptions) {
-		o.Utc = utc
-	}
-}
-
-// PostgreSQLOptions PostgreSQL 选项
-type PostgreSQLOptions struct {
-	SSLMode  string
-	TimeZone string
-}
-
-// PostgreSQLOption PostgreSQL 选项函数
-type PostgreSQLOption func(*PostgreSQLOptions)
-
-// WithPostgreSQLSSLMode 设置 SSL 模式
-func WithPostgreSQLSSLMode(sslmode string) PostgreSQLOption {
-	return func(o *PostgreSQLOptions) {
-		o.SSLMode = sslmode
-	}
-}
-
-// WithPostgreSQLTimeZone 设置时区
-func WithPostgreSQLTimeZone(timezone string) PostgreSQLOption {
-	return func(o *PostgreSQLOptions) {
-		o.TimeZone = timezone
-	}
-}
-
-// CreateMySQLDSNWithOptions 使用选项创建 MySQL DSN
-func CreateMySQLDSNWithOptions(host string, port int, user, password, dbname string, opts ...MySQLOption) string {
-	return MySQLDSN(host, port, user, password, dbname, opts...)
-}
-
-// CreatePostgreSQLDSNWithOptions 使用选项创建 PostgreSQL DSN
-func CreatePostgreSQLDSNWithOptions(host string, port int, user, password, dbname string, opts ...PostgreSQLOption) string {
-	return PostgreSQLDSN(host, port, user, password, dbname, opts...)
-}
+// 保留旧的类型别名以确保向后兼容
+type (
+	// MySQLOptions MySQL 选项（已移至 mysql.go）
+	MySQLOptions = MySQLOptions
+	// MySQLOption MySQL 选项函数（已移至 mysql.go）
+	MySQLOption = MySQLOption
+	// PostgreSQLOptions PostgreSQL 选项（已移至 postgres.go）
+	PostgreSQLOptions = PostgreSQLOptions
+	// PostgreSQLOption PostgreSQL 选项函数（已移至 postgres.go）
+	PostgreSQLOption = PostgreSQLOption
+)
