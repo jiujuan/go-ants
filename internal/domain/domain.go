@@ -1,200 +1,126 @@
-// Package domain 提供了业务逻辑层，是应用程序的核心业务规则所在。
+// Package domain 提供领域层，包含用户相关的核心业务规则、实体和仓储接口。
 package domain
 
 import (
-	"context"
-
-	"github.com/jiujuan/go-ants/pkg/log"
+	"errors"
+	"time"
 )
 
-// ===== 基础接口 =====
+// ===== 错误定义 =====
 
-// Repository 数据仓库接口
-type Repository interface {
-	// Create 创建记录
-	Create(ctx context.Context, entity interface{}) error
-	// Update 更新记录
-	Update(ctx context.Context, entity interface{}) error
-	// Delete 删除记录
-	Delete(ctx context.Context, id interface{}) error
-	// GetByID 根据 ID 获取记录
-	GetByID(ctx context.Context, id interface{}) (interface{}, error)
-	// List 列表查询
-	List(ctx context.Context, opts ...ListOption) ([]interface{}, error)
+// DomainError 领域错误
+type DomainError struct {
+	Code    ErrorCode
+	Message string
 }
 
-// ListOption 列表查询选项
-type ListOption func(*ListOptions)
-
-// ListOptions 列表查询配置
-type ListOptions struct {
-	Page     int
-	PageSize int
-	OrderBy  string
-	Filters  map[string]interface{}
-}
-
-// WithPage 设置页码
-func WithPage(page int) ListOption {
-	return func(o *ListOptions) {
-		o.Page = page
-	}
-}
-
-// WithPageSize 设置每页大小
-func WithPageSize(pageSize int) ListOption {
-	return func(o *ListOptions) {
-		o.PageSize = pageSize
-	}
-}
-
-// WithOrderBy 设置排序字段
-func WithOrderBy(orderBy string) ListOption {
-	return func(o *ListOptions) {
-		o.OrderBy = orderBy
-	}
-}
-
-// WithFilter 设置过滤条件
-func WithFilter(key string, value interface{}) ListOption {
-	return func(o *ListOptions) {
-		if o.Filters == nil {
-			o.Filters = make(map[string]interface{})
-		}
-		o.Filters[key] = value
-	}
-}
-
-// ===== 基础服务 =====
-
-// BaseService 基础服务
-type BaseService struct {
-	log *log.Logger
-}
-
-// NewBaseService 创建基础服务
-func NewBaseService() *BaseService {
-	return &BaseService{
-		log: log.DefaultLogger(),
-	}
-}
-
-// Logger 获取日志实例
-func (s *BaseService) Logger() *log.Logger {
-	return s.log
-}
-
-// ContextWithLogger 将日志器添加到上下文
-func ContextWithLogger(ctx context.Context, logger *log.Logger) context.Context {
-	return log.WithLogger(ctx, logger)
-}
-
-// ===== 通用业务逻辑 =====
-
-// PaginationResult 分页结果
-type PaginationResult struct {
-	Total    int64       `json:"total"`
-	Page     int         `json:"page"`
-	PageSize int         `json:"page_size"`
-	Data     interface{} `json:"data"`
-}
-
-// NewPaginationResult 创建分页结果
-func NewPaginationResult(total int64, page, pageSize int, data interface{}) *PaginationResult {
-	return &PaginationResult{
-		Total:    total,
-		Page:     page,
-		PageSize: pageSize,
-		Data:     data,
-	}
-}
+func (e *DomainError) Error() string { return e.Message }
 
 // ErrorCode 错误码
 type ErrorCode int
 
 const (
-	// ErrCodeInternal 服务器内部错误
-	ErrCodeInternal ErrorCode = 500
-	// ErrCodeNotFound 资源未找到
-	ErrCodeNotFound ErrorCode = 404
-	// ErrCodeBadRequest 请求参数错误
-	ErrCodeBadRequest ErrorCode = 400
-	// ErrCodeUnauthorized 未授权
-	ErrCodeUnauthorized ErrorCode = 401
-	// ErrCodeForbidden 禁止访问
-	ErrCodeForbidden ErrorCode = 403
-	// ErrCodeConflict 资源冲突
-	ErrCodeConflict ErrorCode = 409
+	ErrCodeUnknown          ErrorCode = 10000
+	ErrCodeUserNotFound     ErrorCode = 10001
+	ErrCodeUserAlreadyExist ErrorCode = 10002
+	ErrCodeInvalidPassword  ErrorCode = 10003
+	ErrCodeInvalidEmail     ErrorCode = 10004
+	ErrCodeInvalidUsername  ErrorCode = 10005
+	ErrCodeUserDisabled     ErrorCode = 10006
+	ErrCodeTokenInvalid     ErrorCode = 10007
+	ErrCodeTokenExpired     ErrorCode = 10008
 )
 
-// DomainError 业务错误
-type DomainError struct {
-	Code    ErrorCode `json:"code"`
-	Message string    `json:"message"`
+// 预定义领域错误
+var (
+	ErrUserNotFound     = &DomainError{Code: ErrCodeUserNotFound, Message: "用户不存在"}
+	ErrUserAlreadyExist = &DomainError{Code: ErrCodeUserAlreadyExist, Message: "用户已存在"}
+	ErrInvalidPassword  = &DomainError{Code: ErrCodeInvalidPassword, Message: "密码不正确"}
+	ErrInvalidEmail     = &DomainError{Code: ErrCodeInvalidEmail, Message: "邮箱格式不正确"}
+	ErrInvalidUsername  = &DomainError{Code: ErrCodeInvalidUsername, Message: "用户名格式不正确"}
+	ErrUserDisabled     = &DomainError{Code: ErrCodeUserDisabled, Message: "账户已被禁用"}
+	ErrTokenInvalid     = &DomainError{Code: ErrCodeTokenInvalid, Message: "Token 无效"}
+	ErrTokenExpired     = &DomainError{Code: ErrCodeTokenExpired, Message: "Token 已过期"}
+)
+
+// ===== 用户实体 =====
+
+// UserStatus 用户状态
+type UserStatus int
+
+const (
+	UserStatusActive   UserStatus = 1 // 正常
+	UserStatusInactive UserStatus = 2 // 禁用
+)
+
+// User 用户领域实体（对应数据库 users 表）
+type User struct {
+	ID           uint       `gorm:"primaryKey;autoIncrement"`
+	Username     string     `gorm:"uniqueIndex;size:50;not null"`
+	Email        string     `gorm:"uniqueIndex;size:100;not null"`
+	PasswordHash string     `gorm:"size:255;not null"`
+	Nickname     string     `gorm:"size:100"`
+	Avatar       string     `gorm:"size:255"`
+	Status       UserStatus `gorm:"default:1"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
-func (e *DomainError) Error() string {
-	return e.Message
+// TableName 指定表名
+func (User) TableName() string { return "users" }
+
+// ===== 用户仓储接口（domain 层定义，data 层实现）=====
+
+// UserRepository 用户仓储接口
+type UserRepository interface {
+	Create(user *User) error
+	GetByID(id uint) (*User, error)
+	GetByEmail(email string) (*User, error)
+	GetByUsername(username string) (*User, error)
+	ExistsByEmail(email string) (bool, error)
+	ExistsByUsername(username string) (bool, error)
 }
 
-// NewDomainError 创建业务错误
-func NewDomainError(code ErrorCode, message string) *DomainError {
-	return &DomainError{
-		Code:    code,
-		Message: message,
+// ===== Token 黑名单仓储接口 =====
+
+// TokenBlacklistRepository Token 黑名单仓储（登出时将 Token 加入黑名单）
+type TokenBlacklistRepository interface {
+	// Add 将 token 加入黑名单，ttl 为过期时长（秒）
+	Add(token string, ttlSeconds int64) error
+	// Exists 判断 token 是否在黑名单中
+	Exists(token string) (bool, error)
+}
+
+// ===== 用户领域服务 =====
+
+// UserDomain 用户领域服务（纯业务规则，不依赖外部基础设施）
+type UserDomain struct{}
+
+// NewUserDomain 创建用户领域服务
+func NewUserDomain() *UserDomain { return &UserDomain{} }
+
+// ValidateUsername 校验用户名：3-50 位，字母/数字/下划线
+func (d *UserDomain) ValidateUsername(username string) error {
+	if len(username) < 3 || len(username) > 50 {
+		return errors.New("用户名长度必须在 3-50 个字符之间")
 	}
-}
-
-// ErrInternal 创建内部错误
-func ErrInternal(message string) *DomainError {
-	return NewDomainError(ErrCodeInternal, message)
-}
-
-// ErrNotFound 创建未找到错误
-func ErrNotFound(message string) *DomainError {
-	return NewDomainError(ErrCodeNotFound, message)
-}
-
-// ErrBadRequest 创建请求错误
-func ErrBadRequest(message string) *DomainError {
-	return NewDomainError(ErrCodeBadRequest, message)
-}
-
-// ErrUnauthorized 创建未授权错误
-func ErrUnauthorized(message string) *DomainError {
-	return NewDomainError(ErrCodeUnauthorized, message)
-}
-
-// ErrForbidden 创建禁止错误
-func ErrForbidden(message string) *DomainError {
-	return NewDomainError(ErrCodeForbidden, message)
-}
-
-// ErrConflict 创建冲突错误
-func ErrConflict(message string) *DomainError {
-	return NewDomainError(ErrCodeConflict, message)
-}
-
-// ===== 业务操作辅助函数 =====
-
-// HandleRepoError 处理仓库错误
-func HandleRepoError(err error) *DomainError {
-	if err == nil {
-		return nil
+	for _, c := range username {
+		if !isAlphanumericOrUnderscore(c) {
+			return errors.New("用户名只能包含字母、数字和下划线")
+		}
 	}
-
-	// 可以根据具体错误类型进行映射
-	// 这里简化处理
-	log.Error("repository error",
-		log.Error(err))
-
-	return ErrInternal("database operation failed")
+	return nil
 }
 
-// HandleCacheError 处理缓存错误（不返回错误，仅记录日志）
-func HandleCacheError(err error) {
-	if err != nil {
-		log.Warn("cache error",
-			log.Error(err))
+// ValidatePassword 校验密码：8-64 位
+func (d *UserDomain) ValidatePassword(password string) error {
+	if len(password) < 8 || len(password) > 64 {
+		return errors.New("密码长度必须在 8-64 个字符之间")
 	}
+	return nil
+}
+
+func isAlphanumericOrUnderscore(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') || c == '_'
 }
