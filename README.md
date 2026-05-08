@@ -8,7 +8,7 @@ go-ants 是一个现代化的 Go Web 应用开发框架，提供一个单体应�
 - **分层架构**: Transport -> Service -> Business -> Data 层
 - **模块化设计**: 高度模块化，可按需引入
 - **函数选项模式**: 灵活的组件配置方式
-- **依赖注入**: 支持 Google Wire
+- **依赖注入**: 支持 Google Wire❌
 - **多种 HTTP 框架**: 支持 Gin 和 Fiber
 - **完整的技术栈**:
   - 数据库: GORM (MySQL/PostgreSQL)
@@ -100,15 +100,19 @@ func main() {
 ```
 myproject/
 ├── cmd/                    # 应用入口
-│   └── myproject/
-│       └── main.go
+│   └── ants/
+│   ├    └── main.go
+│   └── app/
 ├── configs/               # 配置文件
 │   └── config.yaml
 ├── internal/              # 内部代码
-│   ├── domain/              # 业务逻辑层
-│   ├── data/             # 数据访问层
+│   ├── domain/              # 领域层
+│   ├── data/               # 数据访问层
+│   ├── router/             # 路由层
+│   ├── middleware/        # 中间件
+│   ├── handler/           # http请求处理层
 │   ├── server/           # HTTP/gRPC 服务器
-│   └── service/          # 应用服务层
+│   └── service/          # 应用服务层，编排领域层
 ├── pkg/                   # 公共库（框架核心）
 │   ├── app/
 │   ├── auth/
@@ -123,6 +127,7 @@ myproject/
 │   ├── transport/
 │   ├── validator/
 │   ├── worker/
+│   ├── xerror/
 │   └── wire/
 ├── go.mod
 └── README.md
