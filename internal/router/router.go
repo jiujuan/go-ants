@@ -1,4 +1,4 @@
-// Package router 提供路由注册，将 handler 与中间件挂载到 Gin 引擎。
+// Package router 统一注册所有路由，按公开/鉴权分组挂载。
 package router
 
 import (
@@ -11,10 +11,28 @@ import (
 )
 
 // Register 注册所有路由
-// jwtAuth 和 blacklist 用于需要鉴权的路由（当前登出接口可选鉴权）
+//
+// 路由规划：
+//
+//	公开路由（无需 Token）：
+//	  POST   /api/v1/users/register
+//	  POST   /api/v1/users/login
+//	  GET    /api/v1/messages            — 留言列表
+//	  GET    /api/v1/messages/:id        — 留言详情
+//	  GET    /api/v1/messages/:id/comments — 评论列表
+//
+//	鉴权路由（需 Bearer Token）：
+//	  POST   /api/v1/users/logout
+//	  POST   /api/v1/messages            — 发布留言
+//	  PUT    /api/v1/messages/:id        — 更新留言
+//	  DELETE /api/v1/messages/:id        — 删除留言
+//	  POST   /api/v1/messages/:id/comments    — 发表评论
+//	  DELETE /api/v1/messages/:id/comments/:cid — 删除评论
 func Register(
 	engine *gin.Engine,
 	userHandler *handler.UserHandler,
+	msgHandler *handler.MessageBoardHandler,
+	commentHandler *handler.CommentHandler,
 	jwtAuth *auth.JWT,
 	blacklist domain.TokenBlacklistRepository,
 ) {
@@ -23,25 +41,40 @@ func Register(
 	engine.Use(middleware.CORS())
 	engine.Use(middleware.Logger())
 
-	// ===== 基础路由 =====
+	// 健康检查
 	engine.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok", "service": "user-service"})
+		c.JSON(200, gin.H{"status": "ok", "service": "go-ants-user-messageboard"})
 	})
 
-	// ===== API v1 =====
 	v1 := engine.Group("/api/v1")
 
-	// 公开路由（无需鉴权）
-	users := v1.Group("/users")
-	{
-		users.POST("/register", userHandler.Register) // 注册
-		users.POST("/login", userHandler.Login)       // 登录
-	}
+	// ===== 公开路由 =====
 
-	// 需要鉴权的路由
-	authUsers := v1.Group("/users")
-	authUsers.Use(middleware.JWTAuth(jwtAuth, blacklist))
+	// 用户
+	v1.POST("/users/register", userHandler.Register)
+	v1.POST("/users/login", userHandler.Login)
+
+	// 留言板（只读）
+	v1.GET("/messages", msgHandler.ListMessages)
+	v1.GET("/messages/:id", msgHandler.GetMessage)
+
+	// 评论（只读）
+	v1.GET("/messages/:id/comments", commentHandler.ListComments)
+
+	// ===== 鉴权路由 =====
+	auth := v1.Group("")
+	auth.Use(middleware.JWTAuth(jwtAuth, blacklist))
 	{
-		authUsers.POST("/logout", userHandler.Logout) // 登出（需携带有效 token）
+		// 用户
+		auth.POST("/users/logout", userHandler.Logout)
+
+		// 留言板（写操作）
+		auth.POST("/messages", msgHandler.CreateMessage)
+		auth.PUT("/messages/:id", msgHandler.UpdateMessage)
+		auth.DELETE("/messages/:id", msgHandler.DeleteMessage)
+
+		// 评论（写操作）
+		auth.POST("/messages/:id/comments", commentHandler.CreateComment)
+		auth.DELETE("/messages/:id/comments/:cid", commentHandler.DeleteComment)
 	}
 }

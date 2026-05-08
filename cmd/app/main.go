@@ -1,5 +1,5 @@
-// Package main 用户服务入口
-// 基于 go-ants 框架实现用户注册、登录、登出 HTTP API
+// Package main go-ants 用户服务入口（v0.3.1）
+// 包含：用户注册/登录/登出 + 留言板 + 评论
 package main
 
 import (
@@ -28,14 +28,14 @@ import (
 
 // ===== 配置结构体 =====
 
-// AppConfig 应用配置（对应 configs/config.yaml）
+// AppConfig 应用配置，对应 configs/config.yaml
 type AppConfig struct {
 	Server struct {
 		Addr string `mapstructure:"addr"`
-		Mode string `mapstructure:"mode"`
+		Mode string `mapstructure:"mode"` // debug | release
 	} `mapstructure:"server"`
 	Database struct {
-		Driver       string `mapstructure:"driver"`
+		Driver       string `mapstructure:"driver"`        // mysql | postgres
 		DSN          string `mapstructure:"dsn"`
 		MaxIdleConns int    `mapstructure:"max_idle_conns"`
 		MaxOpenConns int    `mapstructure:"max_open_conns"`
@@ -47,22 +47,22 @@ type AppConfig struct {
 	} `mapstructure:"redis"`
 	Log struct {
 		Level  string `mapstructure:"level"`
-		Format string `mapstructure:"format"`
+		Format string `mapstructure:"format"` // json | console
 	} `mapstructure:"log"`
 	Auth struct {
 		JWTSecret            string `mapstructure:"jwt_secret"`
 		JWTIssuer            string `mapstructure:"jwt_issuer"`
-		JWTExpiration        int    `mapstructure:"jwt_expiration"`         // 秒
-		JWTRefreshExpiration int    `mapstructure:"jwt_refresh_expiration"` // 秒
+		JWTExpiration        int    `mapstructure:"jwt_expiration"`         // 秒，默认 86400 (24h)
+		JWTRefreshExpiration int    `mapstructure:"jwt_refresh_expiration"` // 秒，默认 2592000 (30d)
 	} `mapstructure:"auth"`
 }
 
 func main() {
-	// 注册信号，实现优雅退出
+	// 优雅退出信号
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	// ===== Step 1: 加载配置文件 =====
+	// ===== Step 1: 加载配置 =====
 	cfg := conf.New()
 	if err := cfg.Load("configs/config.yaml"); err != nil {
 		log.Errorf("load config failed: %v", err)
@@ -97,8 +97,12 @@ func main() {
 		log.Errorf("connect database failed: %v", err)
 		os.Exit(1)
 	}
-	// 自动迁移建表
-	if err := db.AutoMigrate(&domain.User{}); err != nil {
+	// 自动建表：User、Message、Comment
+	if err := db.AutoMigrate(
+		&domain.User{},
+		&domain.Message{},
+		&domain.Comment{},
+	); err != nil {
 		log.Errorf("auto migrate failed: %v", err)
 		os.Exit(1)
 	}
@@ -114,15 +118,16 @@ func main() {
 		pkgredis.WithDB(appCfg.Redis.DB),
 	)
 	if err != nil {
-		// Redis 连接失败时打印警告，不阻断启动（黑名单功能降级）
+		// Redis 不可用时优雅降级（Token 黑名单功能关闭）
 		log.Warnf("connect redis failed: %v, token blacklist disabled", err)
 		redisClient = nil
 	}
 
-	// ===== Step 5: 初始化 JWT 认证器 =====
+	// ===== Step 5: 初始化 JWT =====
 	jwtSecret := appCfg.Auth.JWTSecret
 	if jwtSecret == "" {
-		jwtSecret = "change-me-in-production"
+		jwtSecret = "change-me-in-production-please"
+		log.Warn("jwt_secret not set, using insecure default")
 	}
 	expiration := time.Duration(appCfg.Auth.JWTExpiration) * time.Second
 	if expiration == 0 {
@@ -139,8 +144,9 @@ func main() {
 		auth.WithRefreshExpiration(refreshExpiration),
 	)
 
-	// ===== Step 6: 依赖注入（手动 wire）=====
-	// data 层
+	// ===== Step 6: 依赖注入 =====
+
+	// 数据层
 	dataLayer, dataCleanup, err := data.New(db, redisClient)
 	if err != nil {
 		log.Errorf("init data layer failed: %v", err)
@@ -148,19 +154,27 @@ func main() {
 	}
 	defer dataCleanup()
 
+	// 仓储
 	userRepo := data.NewUserRepo(dataLayer)
+	msgRepo := data.NewMessageRepo(dataLayer)
+	commentRepo := data.NewCommentRepo(dataLayer)
+
 	var blacklistRepo domain.TokenBlacklistRepository
 	if redisClient != nil {
 		blacklistRepo = data.NewTokenBlacklistRepo(dataLayer)
 	}
 
-	// service 层
+	// 服务层
 	userSvc := service.NewUserService(userRepo, blacklistRepo, jwtAuth)
+	msgSvc := service.NewMessageBoardService(msgRepo)
+	commentSvc := service.NewCommentService(commentRepo, msgRepo)
 
-	// handler 层
+	// Handler 层
 	userHandler := handler.NewUserHandler(userSvc)
+	msgHandler := handler.NewMessageBoardHandler(msgSvc)
+	commentHandler := handler.NewCommentHandler(commentSvc)
 
-	// ===== Step 7: 初始化 HTTP 服务器 =====
+	// ===== Step 7: HTTP 服务器 =====
 	addr := appCfg.Server.Addr
 	if addr == "" {
 		addr = ":8080"
@@ -171,22 +185,22 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	ginServer := transport.NewGinServer("user-service",
+	ginServer := transport.NewGinServer("go-ants-service",
 		transport.WithAddr(addr),
 	)
 
-	// 注册路由
-	router.Register(ginServer.Engine(), userHandler, jwtAuth, blacklistRepo)
+	// 注册全部路由
+	router.Register(ginServer.Engine(), userHandler, msgHandler, commentHandler, jwtAuth, blacklistRepo)
 
-	// ===== Step 8: 启动应用，管理生命周期 =====
+	// ===== Step 8: 启动应用 =====
 	app, appCleanup := ants.New(
-		ants.WithName("user-service"),
+		ants.WithName("go-ants-service"),
 		ants.WithLogger(log.DefaultLogger()),
 		ants.WithComponents(ginServer),
 	)
 	defer appCleanup()
 
-	log.Infof("user service starting, addr=%s mode=%s", addr, appCfg.Server.Mode)
+	log.Infof("go-ants service v0.3.1 starting — addr=%s mode=%s", addr, appCfg.Server.Mode)
 
 	if err := app.Run(); err != nil {
 		log.Errorf("application exit with error: %v", err)
